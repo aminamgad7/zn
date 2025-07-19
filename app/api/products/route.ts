@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getServerSession } from 'next-auth';
+import { authOptions } from '@/lib/auth';
 import connectDB from '@/lib/mongodb';
 import Product from '@/models/Product';
 import Category from '@/models/Category';
-import User from '@/models/User';
 
 export async function GET(request: NextRequest) {
   try {
@@ -63,12 +64,28 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
+    // Check authentication and authorization
+    const session = await getServerSession(authOptions);
+    if (!session?.user) {
+      return NextResponse.json(
+        { message: 'غير مصرح لك بالوصول' },
+        { status: 401 }
+      );
+    }
+
+    if (session.user.role !== 'vendor') {
+      return NextResponse.json(
+        { message: 'هذه الميزة متاحة للبائعين فقط' },
+        { status: 403 }
+      );
+    }
+
     await connectDB();
 
     const productData = await request.json();
 
     // Validate required fields
-    const requiredFields = ['name', 'description', 'price', 'sku', 'category', 'vendor'];
+    const requiredFields = ['name', 'description', 'price', 'marketerPrice', 'wholesalePrice', 'sku', 'category'];
     for (const field of requiredFields) {
       if (!productData[field]) {
         return NextResponse.json(
@@ -78,11 +95,49 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // Validate that vendor is the authenticated user
+    if (productData.vendor && productData.vendor !== session.user.id) {
+      return NextResponse.json(
+        { message: 'لا يمكنك إضافة منتجات لبائع آخر' },
+        { status: 403 }
+      );
+    }
+
+    // Set vendor to authenticated user
+    productData.vendor = session.user.id;
+
+    // Validate price relationships
+    const { price, marketerPrice, wholesalePrice } = productData;
+    if (marketerPrice >= price) {
+      return NextResponse.json(
+        { message: 'سعر المسوق يجب أن يكون أقل من السعر الأساسي' },
+        { status: 400 }
+      );
+    }
+    if (wholesalePrice >= price) {
+      return NextResponse.json(
+        { message: 'سعر تاجر الجملة يجب أن يكون أقل من السعر الأساسي' },
+        { status: 400 }
+      );
+    }
+
     // Check if SKU already exists
-    const existingProduct = await Product.findOne({ sku: productData.sku });
+    const existingProduct = await Product.findOne({ 
+      sku: productData.sku,
+      vendor: session.user.id 
+    });
     if (existingProduct) {
       return NextResponse.json(
-        { message: 'رمز المنتج موجود بالفعل' },
+        { message: 'رمز المنتج موجود بالفعل في منتجاتك' },
+        { status: 400 }
+      );
+    }
+
+    // Validate category exists
+    const categoryExists = await Category.findById(productData.category);
+    if (!categoryExists) {
+      return NextResponse.json(
+        { message: 'التصنيف المحدد غير موجود' },
         { status: 400 }
       );
     }
@@ -103,7 +158,7 @@ export async function POST(request: NextRequest) {
     
     if (error.code === 11000) {
       return NextResponse.json(
-        { message: 'رمز المنتج موجود بالفعل' },
+        { message: 'رمز المنتج موجود بالفعل في النظام' },
         { status: 400 }
       );
     }

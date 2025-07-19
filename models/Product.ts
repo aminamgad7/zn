@@ -6,6 +6,7 @@ export interface IProduct extends Document {
   description: string;
   descriptionEn?: string;
   price: number;
+  marketerPrice?: number;
   wholesalePrice?: number;
   comparePrice?: number;
   cost?: number;
@@ -56,6 +57,10 @@ const ProductSchema = new Schema<IProduct>({
     type: Number,
     required: [true, 'سعر المنتج مطلوب'],
     min: [0, 'السعر يجب أن يكون أكبر من صفر'],
+  },
+  marketerPrice: {
+    type: Number,
+    min: [0, 'سعر المسوق يجب أن يكون أكبر من صفر'],
   },
   wholesalePrice: {
     type: Number,
